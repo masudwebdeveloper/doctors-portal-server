@@ -19,7 +19,6 @@ const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology:
 
 function verifyJWT(req, res, next) {
     const authHeader = req.headers.authorization;
-    console.log(authHeader);
     if (!authHeader) {
         return res.status(401).send({ message: 'unauthorization access' });
     }
@@ -39,6 +38,19 @@ async function run() {
         const appointmentOptionCollection = client.db('doctorsPortal').collection('appointmentOptions');
         const bookingsCollection = client.db('doctorsPortal').collection('bookings');
         const usersCollection = client.db('doctorsPortal').collection('users');
+        const doctorsCollection = client.db('doctorsPortal').collection('doctors');
+
+        //NOTE: 
+        const verifyAdmin = async (req, res, next) => {
+            const decodedEmail = req.decoded.email;
+            const query = { email: decodedEmail };
+            const user = await usersCollection.findOne(query);
+            if (user?.role !== 'admin') {
+                return res.status(403).send({ message: 'unauthorization access' })
+            }
+            next()
+        }
+
         // this is bery interesting api task be carefully handle date
         app.get('/appointmentOptions', async (req, res) => {
             const date = req.query.date;
@@ -57,6 +69,12 @@ async function run() {
             res.send(options);
         })
 
+        app.get('/appointmentSpecialty', async (req, res) => {
+            const query = {};
+            const result = await appointmentOptionCollection.find(query).project({ name: 1 }).toArray();
+            res.send(result);
+        })
+
         /**
              * API name convention
              * GET ('/bookings')
@@ -72,7 +90,7 @@ async function run() {
             const user = await usersCollection.findOne(query);
             if (user) {
                 const token = jwt.sign({ email }, process.env.ACCESS_TOKEN, { expiresIn: '1h' });
-                res.send({ accessToken: token })
+                return res.send({ accessToken: token })
             }
             res.status(403).send({ accessToken: '' })
         })
@@ -98,13 +116,8 @@ async function run() {
         })
 
         //user update for role: "admin"
-        app.put('/users/admin/:id', verifyJWT, async (req, res) => {
-            const decodedEmail = req.decoded.email;
-            const query = { email: decodedEmail };
-            const user = await usersCollection.findOne(query);
-            if (user?.role !== 'admin') {
-                return res.status(403).send({ message: 'unauthorization access' })
-            }
+        app.put('/users/admin/:id', verifyJWT, verifyAdmin, async (req, res) => {
+
             const id = req.params.id;
             const filter = { _id: ObjectId(id) };
             const options = { upsert: true };
@@ -153,6 +166,27 @@ async function run() {
 
             const result = await bookingsCollection.insertOne(booking);
             res.send(result)
+        })
+
+        //save the doctors database use post api
+        app.post('/doctors', verifyJWT, verifyAdmin, async (req, res) => {
+            const query = req.body;
+            const result = await doctorsCollection.insertOne(query);
+            res.send(result);
+        })
+
+        //get save doctors
+        app.get('/doctors', verifyJWT, verifyAdmin, async (req, res) => {
+            const query = {};
+            const doctors = await doctorsCollection.find(query).toArray();
+            res.send(doctors);
+        })
+        //delete save doctors
+        app.delete('/doctors/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: ObjectId(id) };
+            const result = await doctorsCollection.deleteOne(filter);
+            res.send(result);
         })
     }
     finally {
